@@ -144,7 +144,7 @@ def forecast_from_file(country: str, model: str, runs: int = 100):
         runs: number of runs
     Returns:
     """
-    path_to_file = f'grid_search_data/best_hyperparameters/HP_{model}_{country}.csv'
+    path_to_file = f'best_hyperparameters/HP_{model}_{country}.csv'
     df = pd.read_csv(path_to_file)
 
     all_predictions = []
