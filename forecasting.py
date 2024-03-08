@@ -17,8 +17,9 @@ feature_dict = {"FCS": ["FCS"],
                 'economics': ["FCS", "rCSI", "Ramadan", "day of the year",
                              "CE official", "CE unofficial","PEWI", "headline inflation", "food inflation"],
                 "all":["FCS", "rCSI", "Ramadan", "day of the year", "rainfall_ndvi_seasonality",
-                             "rainfall", "NDVI", "log rainfall 1 month anomaly", "log rainfall 3 months anomaly",
-                             "log NDVI anomaly", "CE official", "CE unofficial","PEWI", "headline inflation", "food inflation"]}
+                         "rainfall", "NDVI", "log rainfall 1 month anomaly", "log rainfall 3 months anomaly",
+                         "log NDVI anomaly", "CE official", "CE unofficial","PEWI", "headline inflation",
+                       "food inflation"]}
 
 
 def merge_predictions_and_rtm(country: str, preds: pd.DataFrame, forecast_window=60, show=False):
@@ -128,7 +129,7 @@ def forecast(country: str,
                hyperparameters=hyperparameters
                )
 
-    md.load_data_from_file(train_start_date=datetime(2020, 1, 1),
+    md.load_data_from_file(train_start_date=datetime(2017, 1, 1),
                            train_end_date=train_end_date)
     md.prepare_data()
     md.run(runs)
@@ -150,6 +151,7 @@ def forecast_from_file(country: str, model: str, runs: int = 100):
     all_predictions = []
 
     for ind, row in df.iterrows():
+        print(row['split_date'])
 
         hyperparameters = row[["w_in_scale",
                                "differencing",
@@ -194,7 +196,7 @@ def forecast_from_file(country: str, model: str, runs: int = 100):
         data['split'] = ind+1
         steps = [i for i in range(1, 60)] * data['adm1_code'].nunique()
         data['forecast_step'] = steps
-
+        data.to_csv(f"{country}_{row['split_date']}_{runs}.csv")
         all_predictions.append(data)
     all_predictions = pd.concat(all_predictions)
 
@@ -248,5 +250,12 @@ def early_warning_prototype(country: str):
             preds['first_forecast_date'] = first_forecast
             res.append(preds)
         res = pd.concat(res)
-        res.to_csv("data/{country}_RC_" + date.strftime('%Y-%m-%d') + ".csv")
+        res.to_csv(f"{country}_" + date.strftime('%Y-%m-%d') + ".csv")
+
+
+if __name__ == '__main__':
+    for c in ['Mali']:
+        print(c)
+        f = forecast_from_file(country=c, model='RC', runs=100)
+
 

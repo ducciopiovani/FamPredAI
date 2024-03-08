@@ -1,11 +1,12 @@
 import pandas as pd
 from utilities import multi_to_single
-from ESNMod import ESNMod
+from ESNMod2 import ESNMod
 from collections import defaultdict
 from datetime import datetime, timedelta
 import json
 import numpy as np
 from typing import Union, Optional, List
+from utilities import smooth_past_data
 
 
 class Model():
@@ -65,10 +66,11 @@ class Model():
 
         self.variable_names = variable_names + [target_name]
         self.constants = constants
+        self.normalised_columns = None
 
     def load_data_from_file(self,
-                            train_start_date: datetime,
                             train_end_date: datetime,
+                            train_start_date: Optional[datetime] = None,
                             ):
         path = f"data/{self.country}/full_timeseries_daily.csv"
         data = pd.read_csv(path, header=[0,1],index_col=0)
@@ -86,31 +88,85 @@ class Model():
         3. normalised all data - ignore
         """
 
+        no_smoothing_columns = ["Battles", "Violence against civilians",
+                                "Remote violence", "day of the year"]
+        no_norm_columns = ["Ramadan", "FCS", "rCSI", "rainfall_ndvi_seasonality"]
         data = self.input_data.copy()
 
-        # Smooth all data before use
-        if self.hyperparameters["smoothing"] is not None:
-            data = data.rolling(self.hyperparameters["smoothing"], min_periods=1).mean()
+        # get the level 0 columns
+        all_columns = np.unique(data.columns.get_level_values(0))
+        all_columns = list(all_columns)
 
         self.original_data = data.copy()
+        if 'smoothing' in self.hyperparameters.keys():
+            data = self._smooth_data(data,
+                                     delta_t=self.hyperparameters['smoothing'],
+                                     leave_out_columns=no_smoothing_columns)
 
         if self.hyperparameters["differencing"]:
+            data[[(self.target_name+'_TS', c) for c in self.adm1_list]] = data[self.target_name]
             data[self.target_name] = data[self.target_name].diff()
+
+            # If the target is differenced we want to renormalise it
+            no_norm_columns.remove(self.target_name)
+
+            # Remove the nan from data and external data
             data = data.iloc[1:, :]
             if self.ext_data is not None:
                 self.ext_data = self.ext_data.iloc[1:, :]
 
         # Normalise the data
-        self.data_mean = np.mean(data, axis=0).values
-        self.data_sigma = np.std(data, axis=0).values
-        data = (data - self.data_mean) / self.data_sigma
+        data_array, data_mean, data_std = self._normalise(data=data,
+                                                          leave_out_columns=no_norm_columns)
+        self.data_mean = data_mean
+        self.data_sigma = data_std
 
         # rename columns
-        # TODO in national model not needed -- as long as regional name of feats is the same? Change in FG nat version?
         data.columns = multi_to_single(data.columns)
         if self.ext_data is not None:
             self.ext_data.columns = multi_to_single(self.ext_data.columns)
         self.input_data = data
+
+    def _smooth_data(self, data: pd.DataFrame, delta_t: int = 10,
+                     leave_out_columns: Optional[List] = None) -> pd.DataFrame:
+        """
+        :param data:
+        :param delta_t:
+        :return:
+        """
+        if leave_out_columns is None:
+            leave_out_columns = []
+
+        new_data = pd.DataFrame(index=data.index)
+        for col in data.columns:
+            if col in leave_out_columns:
+                new_data[col] = np.array(data[col])
+            else:
+                new_data[col] = smooth_past_data(np.array(data[col]), delta_t=delta_t)
+
+        return new_data
+
+    def _normalise(self, data: pd.DataFrame, leave_out_columns: list[str]):
+        """
+        Normalises the data and ignores the leave_out_columns. For the leave out columns
+        a mean of 0 and a std 1 are assigned so that the operation x-mean(x)/std(x) will leave
+        the column unchanged.
+        """
+        mean = data.mean()
+        std = data.std()
+
+        for col in data.columns:
+            if col[0] in leave_out_columns:
+                mean[col] = 0
+                std[col] = 1
+
+        mean = np.array(mean)
+        std = np.array(std)
+
+        data_array = np.array(data)
+        data_array = data_array - mean
+        data_array = data_array / std
+        return data_array, mean, std
 
     def prepare_x_y_train(self):
         """
@@ -317,66 +373,5 @@ class Model():
                 )
                 ** 2,
                 axis=1) / train_steps)
-
-    def save_to_db(self, model_name: Optional[str] = None, for_report: Optional[bool] = False,
-                   prod: Optional[bool] = False):
-        if prod:
-            # If prod is true, then force for_report to be true as well
-            for_report = True
-            table = self.db.forecasting_predictions
-        else:
-            table = self.db.forecasting_predictions_test
-
-        # If no model exists with the same values, save the model
-        if self.model_id is None:
-            self.save_model_db(model_name, for_report=for_report, prod=prod)
-        # Check that self.predictions was not already prepared for DB
-        if "forecasting_model_id" not in self.predictions.columns:
-            self.prepare_output()
-        # If the output was prepared before saving the model to DB, modify its value in self.predictions
-        elif self.predictions["forecasting_model_id"].isna().all():
-            self.predictions["forecasting_model_id"] = self.model_id
-
-        db = connectdb_alchemy()
-        self.predictions["datetime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        save_with_deletion(self.predictions, db, table=table, model_id=self.model_id, adm_level=self.adm_level)
-
-    def save_model_db(self, model_name, for_report: Optional[bool] = False, prod: Optional[bool] = False):
-        table = self.db.forecasting_models if prod else self.db.forecasting_models_test
-
-        if self.model_id is not None:
-            raise(Exception("Model already exists in database, cannot duplicate it"))
-
-        if self.model_pickle is None:
-            self._save_model_pickle()
-        model_df = pd.DataFrame([{
-            "adm0_code": self.country_id,
-            "window": self.forecasting_window,
-            "algorithm": "Reservoir Computing",
-            "indicator": self.target_name,
-            "time_granularity": self.time_granularity,
-            "adm_level": self.adm_level,
-            "hyperparameters": json.dumps(self.hyperparameters),
-            "features": json.dumps(self.feature_names),
-            "used_for_report": for_report,
-            "latest": prod,
-            "model_name": model_name,
-            "model_pickle": self.model_pickle
-        }])
-        db = connectdb_alchemy()
-        save_df(model_df, db, table=table)
-
-        # Get model from DB and store model_id
-        model_info = self.db.get_forecasting_model(
-            adm0_code=self.country_id, forecasting_window=self.forecasting_window, algorithm="Reservoir Computing",
-            indicator=self.target_name, time_granularity=self.time_granularity, adm_level=self.adm_level,
-            hyperparameters=self.hyperparameters, features=self.feature_names, used_for_report=for_report,
-            model_in_prod=prod)[0]
-        self.model_id = model_info["id"]
-
-    def _save_model_pickle(self):
-        # TODO save model pickle to OSS with input and internal RC weights (placeholder to start)
-        self.model_pickle = None
-
 
 

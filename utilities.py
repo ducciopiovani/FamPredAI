@@ -5,6 +5,90 @@ import pandas as pd
 import os
 
 
+def shift_dataframe_by_date(dataframe, target_date):
+    """
+    Shift each column of the pandas DataFrame so that the last valid index is at least the specified date.
+
+    Parameters:
+        dataframe (pandas.DataFrame): The input DataFrame with a datetime index and numerical columns.
+        target_date (str or pd.Timestamp): The desired date as a string in 'yyyy-mm-dd' format or as a pandas Timestamp.
+
+    Returns:
+        pandas.DataFrame: The new DataFrame with shifted values.
+    """
+    # Convert the target_date to a pandas Timestamp object if it's provided as a string.
+    if isinstance(target_date, str):
+        target_date = pd.Timestamp(target_date)
+
+    # Shift the last valid index for each column.
+    shifted_dataframe = dataframe.copy()
+    for col in dataframe.columns:
+        last_valid_index = dataframe[col].last_valid_index()
+
+        if isinstance(last_valid_index, str):
+            last_valid_index = pd.Timestamp(last_valid_index)
+
+
+        shift = (target_date - last_valid_index).days
+        if (target_date - last_valid_index).days > 0:
+            shifted_dataframe[col] = dataframe[col].shift(shift)
+
+    return shifted_dataframe
+
+
+def extrapolate_with_noise(df, freq="daily"):
+    if freq == "daily":
+        step = pd.DateOffset(days=1)
+    elif freq == "monthly":
+        step = pd.DateOffset(months=1)
+    elif freq == "decade":
+        step = pd.DateOffset(days=10)
+
+    df_new = df.copy()
+    for col in df.columns:
+        df_col = df_new[col].copy()
+        scale = np.std(df_col)*0.01
+        #df_col = df_col.reset_index().drop('index', 1)
+
+        lvi = df_col.last_valid_index()
+        li = df_col.index[-1]
+
+        x = float(df_col[lvi])
+        # m = x-float(df_col.iloc[lvi-1])
+
+        for i in pd.date_range(start=lvi + step, end=li, freq=step):
+            df_col[i.date()] = x + scale*(np.random.random()-0.5)*2
+
+        df_col = df_col.interpolate()
+        df_new[col] = list(df_col)
+
+    return df_new
+
+
+def shuffle_io(io_data: tuple) -> tuple:
+    l = io_data[0].shape[0]
+    r = np.arange(l)
+
+    new_input = io_data[0][r]
+    new_output = io_data[1][r]
+
+    new_io_data = (new_input, new_output)
+
+    return new_io_data
+
+
+def smooth_past_data(data, delta_t):
+    new_data = data.copy()
+
+    for t in range(len(data)):
+        if t >= delta_t:
+            new_data[t] = np.nanmean(data[t - delta_t: t+1])
+        else:
+            new_data[t] = np.nanmean(data[0:t+1])
+    #
+    return new_data
+
+
 def multi_to_single(columns: pd.MultiIndex) -> pd.Index:
     """
     Creates a single index from a two-level multiindex by combining the levels to a string of the form 'level0-level1'.
@@ -20,7 +104,7 @@ def rmse(v1, v2):
     return sqrt
 
 
-def performances_forecasts(country: str, nruns: int = 100):
+def performances_forecasts(path : str, country: str, nruns: int = 100):
     """
     RMSE of the forecasts
     Args:
@@ -29,11 +113,11 @@ def performances_forecasts(country: str, nruns: int = 100):
     Returns:
     """
     files = []
-    path = 'old_predictions/RC'
     for file in os.listdir(path):
         if file.split('_')[0] == country:
             if file.split('_')[-1].split('.')[0]==str(nruns):
                 files.append(file)
+
     rmse_list = []
     for n in np.arange(0, len(files)):
         df = pd.read_csv(path+'/'+files[n])
@@ -80,7 +164,7 @@ def find_hyperparameters(country: str, date: datetime, model='RC'):
     Returns:
     """
 
-    path_to_file = f'grid_search_data/best_hyperparameters/HP_{model}_{country}.csv'
+    path_to_file = f'best_hyperparameters/HP_{model}_{country}.csv'
     df = pd.read_csv(path_to_file)
     df['split_date'] = pd.to_datetime(df['split_date'])
     df = df.sort_values(by='split_date')
