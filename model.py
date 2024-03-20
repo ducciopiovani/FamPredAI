@@ -1,9 +1,8 @@
 import pandas as pd
 from utilities import multi_to_single
-from ESNMod2 import ESNMod
+from ESNMod import ESNMod
 from collections import defaultdict
 from datetime import datetime, timedelta
-import json
 import numpy as np
 from typing import Union, Optional, List
 from utilities import smooth_past_data
@@ -93,18 +92,14 @@ class Model():
         no_norm_columns = ["Ramadan", "FCS", "rCSI", "rainfall_ndvi_seasonality"]
         data = self.input_data.copy()
 
-        # get the level 0 columns
-        all_columns = np.unique(data.columns.get_level_values(0))
-        all_columns = list(all_columns)
-
-        self.original_data = data.copy()
         if 'smoothing' in self.hyperparameters.keys():
             data = self._smooth_data(data,
                                      delta_t=self.hyperparameters['smoothing'],
                                      leave_out_columns=no_smoothing_columns)
+        self.original_data = data.copy()
 
         if self.hyperparameters["differencing"]:
-            data[[(self.target_name+'_TS', c) for c in self.adm1_list]] = data[self.target_name]
+
             data[self.target_name] = data[self.target_name].diff()
 
             # If the target is differenced we want to renormalise it
@@ -116,8 +111,8 @@ class Model():
                 self.ext_data = self.ext_data.iloc[1:, :]
 
         # Normalise the data
-        data_array, data_mean, data_std = self._normalise(data=data,
-                                                          leave_out_columns=no_norm_columns)
+        data, data_mean, data_std = self._normalise(data=data,
+                                                    leave_out_columns=no_norm_columns)
         self.data_mean = data_mean
         self.data_sigma = data_std
 
@@ -143,7 +138,7 @@ class Model():
                 new_data[col] = np.array(data[col])
             else:
                 new_data[col] = smooth_past_data(np.array(data[col]), delta_t=delta_t)
-
+        new_data.columns = pd.MultiIndex.from_tuples(new_data.columns, names=['Level1', 'Level2'])
         return new_data
 
     def _normalise(self, data: pd.DataFrame, leave_out_columns: list[str]):
@@ -163,17 +158,15 @@ class Model():
         mean = np.array(mean)
         std = np.array(std)
 
-        data_array = np.array(data)
-        data_array = data_array - mean
-        data_array = data_array / std
-        return data_array, mean, std
+        data = data - mean
+        data = data / std
+        return data, mean, std
 
     def prepare_x_y_train(self):
         """
         Extract training input and target data from self.data. Target data valid for predicting full input data except
         for ramadan.
         """
-        # TODO check length, shouldn't x_train finish one step earlier? Check also ext_train..
         self.x_train = self.input_data[:self.train_end_date].values
         self.y_train = self.input_data.iloc[1:][:self.train_end_date].values
         if self.ext_data is not None:
@@ -236,8 +229,10 @@ class Model():
         """
         Function that takes self.predictions and inverts the differencing applied to original data.
         """
-        self.predictions.loc[self.predictions["date"] == self.train_end_date + timedelta(days=1), "prediction"] += (
-            self.original_data.loc[self.train_end_date, self.target_name].values)
+        for adm1_code in self.predictions.adm1_code.unique():
+            self.predictions.loc[(self.predictions["date"] == self.train_end_date + timedelta(days=1)) &
+                                 (self.predictions.adm1_code == adm1_code), "prediction"] += (
+                self.original_data.loc[self.train_end_date, self.target_name][str(adm1_code)])
         self.predictions["prediction"] = self.predictions.groupby("adm1_code", dropna=False)["prediction"].cumsum()
 
     def train_and_predict(self):

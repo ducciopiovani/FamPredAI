@@ -132,7 +132,7 @@ def forecast(country: str,
     md.load_data_from_file(train_start_date=datetime(2017, 1, 1),
                            train_end_date=train_end_date)
     md.prepare_data()
-    md.run(runs)
+    md.run(runs, verbose=True)
     return md.predictions
 
 
@@ -199,7 +199,6 @@ def forecast_from_file(country: str, model: str, runs: int = 100):
         data.to_csv(f"{country}_{row['split_date']}_{runs}.csv")
         all_predictions.append(data)
     all_predictions = pd.concat(all_predictions)
-
     name = f'new_predictions/{country}_RC_{runs}.csv'
     all_predictions.to_csv(name, index=False)
     res = all_predictions.groupby(['adm1_code', 'split']).apply(lambda d: rmse(d['data'], d['prediction'])).reset_index()
@@ -254,7 +253,7 @@ def early_warning_prototype(country: str):
 
 
 if __name__ == '__main__':
-    for c in ['Mali']:
+    for c in ['Syria', 'Mali', 'Nigeria']:
         print(c)
         f = forecast_from_file(country=c, model='RC', runs=100)
 
