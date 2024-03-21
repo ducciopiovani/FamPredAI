@@ -1,5 +1,5 @@
 
-from model import Model
+from reservoir_computing import Model
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -105,7 +105,7 @@ def forecast(country: str,
              hyperparameters: dict,
              target: str = 'FCS',
              forecast_window=60,
-             runs=20):
+             runs=30):
     """
     Generate the forecasts
     Args:
@@ -132,7 +132,7 @@ def forecast(country: str,
     md.load_data_from_file(train_start_date=datetime(2017, 1, 1),
                            train_end_date=train_end_date)
     md.prepare_data()
-    md.run(runs, verbose=True)
+    md.run(runs, verbose=False)
     return md.predictions
 
 
@@ -219,14 +219,13 @@ def early_warning_prototype(country: str):
     fcs.index = pd.to_datetime(fcs.index)
 
     cr = find_crises(fcs, t=0.1)
-    cr = cr[(cr['dates']>datetime(2022, 6, 1))&(cr['dates']< datetime(2023,6,1))]
+    cr = cr[(cr['dates'] > datetime(2022, 6, 1)) & (cr['dates'] < datetime(2023, 6, 1))]
     cr = cr[::-1]
 
     for ind, row in cr.iterrows():
         date = row['dates']
         hyperparameters = find_hyperparameters(country='Nigeria', date=date, model='RC')
         constants_list = ["Ramadan", "day of the year", "lean season", "rainfall_ndvi_seasonality"]
-        target = 'FCS'
         all_variables = pd.read_csv(f"data/{country}/full_timeseries_daily.csv", header=[0, 1], index_col=[0])
         all_variables = list(all_variables.melt().variable_0.unique())
         variables = [v for v in feature_dict[hyperparameters['features']] if v in all_variables]
@@ -234,7 +233,7 @@ def early_warning_prototype(country: str):
         variables = [v for v in variables if v not in constants_list]
         variables.remove('FCS')
         res = []
-        for n in range(0, 5):
+        for n in range(0, 3):
             print(n)
             first_forecast = date + timedelta(days=n)
             preds = forecast(country=country,
@@ -255,6 +254,6 @@ def early_warning_prototype(country: str):
 if __name__ == '__main__':
     for c in ['Syria', 'Mali', 'Nigeria']:
         print(c)
-        f = forecast_from_file(country=c, model='RC', runs=100)
+        f = early_warning_prototype(country=c)
 
 
