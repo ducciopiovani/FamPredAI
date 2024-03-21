@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 from typing import List
-from utilities import rmse, find_crises, find_hyperparameters
+from utilities import rmse
 
 feature_dict = {"FCS": ["FCS"],
                 "FCS+": ["FCS", "rCSI", "Ramadan", "day of the year", "rainfall_ndvi_seasonality"],
