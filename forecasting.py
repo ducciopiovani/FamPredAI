@@ -206,52 +206,6 @@ def forecast_from_file(country: str, model: str, runs: int = 100):
     return perf
 
 
-def early_warning_prototype(country: str):
-    """
-    Generate and save forecasts for the crises dates
-    Args:
-        country: Name of the country
-    Returns:
-    """
-    df = pd.read_csv(f'data/{country}/full_timeseries_daily.csv', header=[0,1], index_col=0)
-    fcs = df['FCS']
-    fcs = fcs[fcs.isnull().sum(1) ==0]
-    fcs.index = pd.to_datetime(fcs.index)
-
-    cr = find_crises(fcs, t=0.1)
-    cr = cr[(cr['dates']>datetime(2022, 6, 1))&(cr['dates']< datetime(2023,6,1))]
-    cr = cr[::-1]
-
-    for ind, row in cr.iterrows():
-        date = row['dates']
-        hyperparameters = find_hyperparameters(country='Nigeria', date=date, model='RC')
-        constants_list = ["Ramadan", "day of the year", "lean season", "rainfall_ndvi_seasonality"]
-        target = 'FCS'
-        all_variables = pd.read_csv(f"data/{country}/full_timeseries_daily.csv", header=[0, 1], index_col=[0])
-        all_variables = list(all_variables.melt().variable_0.unique())
-        variables = [v for v in feature_dict[hyperparameters['features']] if v in all_variables]
-        constants = [t for t in constants_list if t in variables]
-        variables = [v for v in variables if v not in constants_list]
-        variables.remove('FCS')
-        res = []
-        for n in range(0, 5):
-            print(n)
-            first_forecast = date + timedelta(days=n)
-            preds = forecast(country=country,
-                             first_forecast=first_forecast,
-                             constants=constants,
-                             variables=variables,
-                             hyperparameters=hyperparameters)
-            preds = preds.pivot(index='date',
-                                columns="adm1_code",
-                                values="prediction"
-                                )
-            preds['first_forecast_date'] = first_forecast
-            res.append(preds)
-        res = pd.concat(res)
-        res.to_csv(f"{country}_" + date.strftime('%Y-%m-%d') + ".csv")
-
-
 if __name__ == '__main__':
     for c in ['Syria', 'Mali', 'Nigeria']:
         print(c)
