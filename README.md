@@ -29,6 +29,7 @@ To generate forecasts for a chosen country and model, just pass the following ar
 - variables: list of continuous secondary data to be used to train the model;
 - hyperparameters: dict of hyperparameters needed for the model;
 - forecast_window: number of days to forecast for.
+
 A dictionary with example arguments for Haiti can be imported from the file [parameters.py](./parameters.py), to be passed to this function.
 
 To generate forecasts for monthly test splits, using the best parameters found for the chosen model at each of these,
