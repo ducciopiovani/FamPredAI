@@ -4,9 +4,9 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
-import plotly.graph_objects as go
 from typing import List
 from utilities import rmse, find_crises, find_hyperparameters
+from utilities import  merge_predictions_and_rtm
 
 feature_dict = {"FCS": ["FCS"],
                 "FCS+": ["FCS", "rCSI", "Ramadan", "day of the year", "rainfall_ndvi_seasonality"],
@@ -198,8 +198,9 @@ def forecast_from_file(country: str, model: str, runs: int = 100):
         data['forecast_step'] = steps
         data.to_csv(f"{country}_{row['split_date']}_{runs}.csv")
         all_predictions.append(data)
+
     all_predictions = pd.concat(all_predictions)
-    name = f'new_predictions/{country}_RC_{runs}.csv'
+    name = f'{country}_RC_{runs}.csv'
     all_predictions.to_csv(name, index=False)
     res = all_predictions.groupby(['adm1_code', 'split']).apply(lambda d: rmse(d['data'], d['prediction'])).reset_index()
     perf = res.groupby('adm1_code')[0].median().median()

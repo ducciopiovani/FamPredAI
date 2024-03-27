@@ -3,6 +3,9 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import os
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
 
 
 def shift_dataframe_by_date(dataframe, target_date):
@@ -104,7 +107,7 @@ def rmse(v1, v2):
     return sqrt
 
 
-def performances_forecasts(path : str, country: str, nruns: int = 100):
+def performances_forecasts(path : str, country: str, old: bool =False, nruns: int = 100):
     """
     RMSE of the forecasts
     Args:
@@ -115,16 +118,28 @@ def performances_forecasts(path : str, country: str, nruns: int = 100):
     files = []
     for file in os.listdir(path):
         if file.split('_')[0] == country:
-            if file.split('_')[-1].split('.')[0]==str(nruns):
+            if nruns:
+                if file.split('_')[-1].split('.')[0]==str(nruns):
+                  files.append(file)
+            else:
                 files.append(file)
+    if old:
+        rmse_list = []
+        for n in np.arange(0, len(files)):
+            df = pd.read_csv(path+'/'+files[n])
+            rlist = []
+            for n in np.arange(2, df.shape[1] - 2, 2):
+                rlist.append(rmse(df.iloc[:, n], df.iloc[:, n - 1]))
+            rmse_list.append(np.median(rlist))
+    else:
+        rmse_list = []
+        for n in np.arange(0, len(files)):
+            df = pd.read_csv(path + '/' + files[n])
+            rlist = []
+            for n in np.arange(2, df.shape[1] - 2, 2):
+                rlist.append(rmse(df.iloc[:, n], df.iloc[:, n - 1]))
+            rmse_list.append(np.median(rlist))
 
-    rmse_list = []
-    for n in np.arange(0, len(files)):
-        df = pd.read_csv(path+'/'+files[n])
-        rlist = []
-        for n in np.arange(2, df.shape[1] - 2, 2):
-            rlist.append(rmse(df.iloc[:, n], df.iloc[:, n - 1]))
-        rmse_list.append(np.median(rlist))
     return rmse_list
 
 
@@ -188,4 +203,79 @@ def find_hyperparameters(country: str, date: datetime, model='RC'):
     hyperparameters['smoothing'] = 10
 
     return hyperparameters
+
+
+def merge_predictions_and_rtm(country: str, preds: pd.DataFrame, forecast_window=60):
+    """
+    Merge data and Predictions
+    Args:
+        country: Name of the country
+        preds: file containing the predictions ( use function forecast)
+        forecast_window: the lenght of the forecasts
+        show: bollean to show the comparison between data and predictions
+    Returns:
+    """
+    preds = preds.melt(id_vars='date').rename(columns={'variable': 'adm1_code', 'value': 'prediction'})
+    preds['adm1_code'] = preds['adm1_code'].astype(int)
+    data = pd.read_csv(f"data/{country}/full_timeseries_daily.csv", header=[0, 1], index_col=0)
+    data.index.name = 'date'
+    data.index = pd.to_datetime(data.index)
+    fcs = data['FCS'].rolling('10D').mean()
+    fcs = fcs.reset_index().melt(id_vars='date', value_name='data', var_name='adm1_code')
+    fcs['adm1_code'] = fcs['adm1_code'].astype(int)
+
+    fcs = fcs.merge(preds, on=['date', 'adm1_code'], how='left')
+    fcs = fcs[~fcs.prediction.isnull()]
+    return fcs
+
+
+def plot(data, country, ncols):
+    admin1 = pd.read_csv("data/adm1_list.csv")
+    admin1 = admin1[admin1.adm0_name == country]
+    adm1_list = admin1['adm1_code'].to_list()
+    adm1_name = admin1[['adm1_code', 'adm1_name']].set_index('adm1_code').to_dict()['adm1_name']
+
+
+    nrows = int(np.ceil(len(adm1_list) / ncols))
+
+    f = make_subplots(nrows,
+                      ncols,
+                      vertical_spacing=0.18,
+                      subplot_titles=tuple([adm1_name[a1] for a1 in adm1_list])
+                      )
+
+    for num_plot, a in enumerate(adm1_list):
+        df = data[data.adm1_code == a].copy()
+        col = num_plot % ncols + 1
+        row = num_plot // ncols + 1
+
+        # prepare subplot: data, predictions and confidence interval
+        f.add_trace(
+            go.Scatter(name='data',
+                       x=df['date'],
+                       y=df['data'],
+                       marker_color='blue',
+                       showlegend=False),
+            row=row, col=col
+        )
+        f.add_trace(
+            go.Scatter(x=df['date'],
+                       y=df['prediction'],
+                       marker_color='red',
+                       showlegend=True if num_plot == 0 else False,
+                       ),
+            row=row, col=col
+        )
+
+    f.update_layout(
+        margin=go.layout.Margin(
+            l=0,  # left margin
+            r=0,  # right margin
+            b=0,  # bottom margin
+            t=30,  # top margin
+        ),
+        height=nrows * 150, width=200 * ncols
+    )
+    return f
+
 

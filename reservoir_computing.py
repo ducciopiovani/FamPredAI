@@ -122,7 +122,8 @@ class Model():
             self.ext_data.columns = multi_to_single(self.ext_data.columns)
         self.input_data = data
 
-    def _smooth_data(self, data: pd.DataFrame, delta_t: int = 10,
+    @staticmethod
+    def _smooth_data(data: pd.DataFrame, delta_t: int = 10,
                      leave_out_columns: Optional[List] = None) -> pd.DataFrame:
         """
         :param data:
