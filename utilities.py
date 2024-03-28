@@ -107,7 +107,7 @@ def rmse(v1, v2):
     return sqrt
 
 
-def performances_forecasts(path : str, country: str, old: bool =False, nruns: int = 100):
+def performances_forecasts(path : str, country: str, nruns: int = 100):
     """
     RMSE of the forecasts
     Args:
@@ -118,108 +118,34 @@ def performances_forecasts(path : str, country: str, old: bool =False, nruns: in
     files = []
     for file in os.listdir(path):
         if file.split('_')[0] == country:
-            if nruns:
-                if file.split('_')[-1].split('.')[0]==str(nruns):
-                  files.append(file)
-            else:
+            if file.split('_')[-1].split('.')[0]==str(nruns):
                 files.append(file)
-    if old:
-        rmse_list = []
-        for n in np.arange(0, len(files)):
-            df = pd.read_csv(path+'/'+files[n])
-            rlist = []
-            for n in np.arange(2, df.shape[1] - 2, 2):
-                rlist.append(rmse(df.iloc[:, n], df.iloc[:, n - 1]))
-            rmse_list.append(np.median(rlist))
-    else:
-        rmse_list = []
-        for n in np.arange(0, len(files)):
-            df = pd.read_csv(path + '/' + files[n])
-            rlist = []
-            for n in np.arange(2, df.shape[1] - 2, 2):
-                rlist.append(rmse(df.iloc[:, n], df.iloc[:, n - 1]))
-            rmse_list.append(np.median(rlist))
 
+    rmse_list = []
+    for n in np.arange(0, len(files)):
+        df = pd.read_csv(path+'/'+files[n])
+        rlist = []
+        for n in np.arange(2, df.shape[1] - 2, 2):
+            rlist.append(rmse(df.iloc[:, n], df.iloc[:, n - 1]))
+        rmse_list.append(np.median(rlist))
     return rmse_list
 
 
-def find_crises(fcs: pd.DataFrame, t: float):
-    """
-    Finds in the rtm data all the dates for which at least one admin1 is showing a deterioration larger than
-    the threshold t.
-    Args:
-        fcs: dataframe with the real time monitoring data
-        t: threshold value
-    Returns:
-    """
-    food_crises = pd.DataFrame()
-    date_list = []
-    admin_list = []
-    for end in fcs.index[::-1]:
-        start = end - timedelta(days=60)
-        if start > fcs.index[0]:
-            diff = fcs.loc[end] - fcs.loc[start]
-            if (diff > t).any():
-                date_list.append(start)
-                admin_list.append((diff > t).to_dict())
-    food_crises['dates'] = date_list
-    food_crises['adm1_codes'] = admin_list
-    return food_crises
-
-
-def find_hyperparameters(country: str, date: datetime, model='RC'):
-    """
-    Select the hyperparameters based on the monthly updates. The function is needed when the
-    forecasts are not generated at the beginning of the month, and selects the most recent hyperparameter
-    update
-    Args:
-        country: name of the country
-        date: first date of the forecasts
-        model: name of the model
-    Returns:
-    """
-
-    path_to_file = f'best_hyperparameters/HP_{model}_{country}.csv'
-    df = pd.read_csv(path_to_file)
-    df['split_date'] = pd.to_datetime(df['split_date'])
-    df = df.sort_values(by='split_date')
-    if date < datetime(2023, 5,1):
-        for n in range(len(df)-1):
-            if df.loc[n, 'split_date'] <= date <= df.loc[n + 1, 'split_date']:
-                row = df.loc[n]
-                break
-    else:
-        row = df.iloc[-1, :]
-
-    hyperparameters = row[["w_in_scale",
-                           "differencing",
-                           "reg_param",
-                           "n_rad",
-                           "n_dim",
-                           "features"]].to_dict()
-    hyperparameters['w_out_fit_flag'] = 'linear_and_square_r'
-    hyperparameters['train_sync_steps'] = 50
-    hyperparameters['n_avg_deg'] = 8
-    hyperparameters['smoothing'] = 10
-
-    return hyperparameters
-
-
-def merge_predictions_and_rtm(country: str, preds: pd.DataFrame, forecast_window=60):
+def merge_predictions_and_rtm(country: str, preds: pd.DataFrame):
     """
     Merge data and Predictions
     Args:
         country: Name of the country
         preds: file containing the predictions ( use function forecast)
-        forecast_window: the lenght of the forecasts
+        forecast_window: the length of the forecasts
         show: bollean to show the comparison between data and predictions
     Returns:
     """
-    preds = preds.melt(id_vars='date').rename(columns={'variable': 'adm1_code', 'value': 'prediction'})
     preds['adm1_code'] = preds['adm1_code'].astype(int)
     data = pd.read_csv(f"data/{country}/full_timeseries_daily.csv", header=[0, 1], index_col=0)
     data.index.name = 'date'
     data.index = pd.to_datetime(data.index)
+    # the algorithms work with a smoothing of 10 days
     fcs = data['FCS'].rolling('10D').mean()
     fcs = fcs.reset_index().melt(id_vars='date', value_name='data', var_name='adm1_code')
     fcs['adm1_code'] = fcs['adm1_code'].astype(int)
@@ -279,3 +205,15 @@ def plot(data, country, ncols):
     return f
 
 
+feature_dict = {"FCS": ["FCS"],
+                "FCS+": ["FCS", "rCSI", "Ramadan", "day of the year", "rainfall_ndvi_seasonality"],
+                "calendar": ["FCS", "Ramadan", "day of the year", "rainfall_ndvi_seasonality"],
+                "climate": ["FCS", "rCSI", "Ramadan", "day of the year", "rainfall_ndvi_seasonality",
+                             "rainfall", "NDVI", "log rainfall 1 month anomaly", "log rainfall 3 months anomaly",
+                             "log NDVI anomaly"],
+                'economics': ["FCS", "rCSI", "Ramadan", "day of the year",
+                             "CE official", "CE unofficial","PEWI", "headline inflation", "food inflation"],
+                "all":["FCS", "rCSI", "Ramadan", "day of the year", "rainfall_ndvi_seasonality",
+                         "rainfall", "NDVI", "log rainfall 1 month anomaly", "log rainfall 3 months anomaly",
+                         "log NDVI anomaly", "CE official", "CE unofficial","PEWI", "headline inflation",
+                       "food inflation"]}

@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import numpy as np
 from typing import Union, Optional, List
-from utilities import smooth_past_data
+from utilities import smooth_past_data, merge_predictions_and_rtm, feature_dict, rmse
 
 
 class Model():
@@ -371,3 +371,109 @@ class Model():
                 axis=1) / train_steps)
 
 
+def forecast(country: str,
+             first_forecast: datetime,
+             constants: List[str],
+             variables: List[str],
+             hyperparameters: dict,
+             target: str = 'FCS',
+             forecast_window=60,
+             runs=20):
+    """
+    Generate the forecasts
+    Args:
+        country: name of the forecasts
+        first_forecast: date of first forecast
+        constants: constants within input variables
+        variables: name of the variables
+        hyperparameters: dictionary containing hyperparameters
+        target: name of the target varible
+        forecast_window: length of the forecasts
+        runs: number runs
+    Returns:
+    """
+
+    train_end_date = first_forecast - timedelta(days=1)
+    md = Model(country=country,
+               forecasting_window=forecast_window,
+               target_name=target,
+               constants=constants,
+               variable_names=variables,
+               hyperparameters=hyperparameters
+               )
+
+    md.load_data_from_file(train_start_date=datetime(2017, 1, 1),
+                           train_end_date=train_end_date)
+    md.prepare_data()
+    md.run(runs, verbose=True)
+    return md.predictions
+
+
+def forecast_from_file(country: str,  runs: int = 100, forecasting_window=60):
+    """
+    Generate the forecasts starting from the file with the hyperparameters selected during the grid seach
+    Args:
+        country: name of the forecasts
+        model: name of the model
+        runs: number of runs
+    Returns:
+    """
+    path_to_file = f'best_hyperparameters/HP_RC_{country}.csv'
+    df = pd.read_csv(path_to_file)
+
+    all_predictions = []
+
+    for ind, row in df.iterrows():
+        print(row['split_date'])
+
+        hyperparameters = row[["w_in_scale",
+                               "differencing",
+                               "reg_param",
+                               "n_rad",
+                               "n_dim",
+                               "features"]].to_dict()
+        hyperparameters['w_out_fit_flag'] = 'linear_and_square_r'
+        hyperparameters['train_sync_steps'] = 50
+        hyperparameters['n_avg_deg'] = 8
+        hyperparameters['smoothing'] = 10
+
+        constants_list = ["Ramadan", "day of the year", "lean season", "rainfall_ndvi_seasonality"]
+
+        all_variables = pd.read_csv(f"data/{country}/full_timeseries_daily.csv", header=[0,1], index_col=[0])
+        all_variables = list(all_variables.melt().variable_0.unique())
+
+        variables = [v for v in feature_dict[hyperparameters['features']] if v in all_variables]
+        constants = [t for t in constants_list if t in variables]
+        variables = [v for v in variables if v not in constants_list]
+        if 'FCS' in variables:
+            variables.remove('FCS')
+        else:
+            print(variables)
+
+        preds = forecast(country=country,
+                         variables=variables,
+                         constants=constants,
+                         hyperparameters=hyperparameters,
+                         forecast_window=forecasting_window,
+                         target='FCS',
+                         first_forecast=datetime.strptime(row['split_date'], "%Y-%m-%d"),
+                         runs=runs
+                         )
+
+        data = merge_predictions_and_rtm(country=country,
+                                         preds=preds)
+
+        data = data[~data['prediction'].isnull()]
+        data['split'] = ind+1
+        steps = [i for i in range(1, forecasting_window+1)] * data['adm1_code'].nunique()
+        data['forecast_step'] = steps
+        data.to_csv(f"forecasts/RC/{country}_{row['split_date']}_{runs}.csv")
+        all_predictions.append(data)
+
+    return
+
+
+
+if __name__ =="__main__":
+
+    forecast_from_file(country='Nigeria', runs=100, forecasting_window=60)

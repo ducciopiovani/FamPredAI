@@ -2,9 +2,10 @@ from typing import Union, List, Optional
 import pandas as pd
 from datetime import datetime, timedelta
 
+from keras import Model
 from keras.models import Sequential
 from keras.callbacks import EarlyStopping
-from keras.layers import Conv1D, MaxPooling1D, Flatten, Dense
+from keras.layers import LSTM, Input, Dense, RepeatVector, TimeDistributed
 from keras.optimizers import Adam
 from sklearn.preprocessing import MinMaxScaler
 
@@ -15,7 +16,7 @@ from time import time
 import tensorflow_addons as tfa
 
 
-class CNNModel():
+class LSTMModel():
     def __init__(self,
                  country: str,
                  forecasting_window: int,
@@ -148,47 +149,45 @@ class CNNModel():
                 break
             # gather input and output parts of the pattern
             input_data.append(sequences[i:end_ix, :])
-            # Flattens for CNN requirements
-            output_data.append(target[end_ix:out_end_ix, :].flatten())
+            output_data.append(target[end_ix:out_end_ix, :])
 
         self.x_train = np.array(input_data)
         self.y_train = np.array(output_data)
         self.training_data = shuffle_io((self.x_train, self.y_train))
-        self.x_pred = np.array([sequences[-hp['n_steps_in']:,:]])
+        self.x_pred = np.array([sequences[-hp['n_steps_in']:, :]])
 
     def define_model(self):
-        hp = self.hyperparameters
-        np.random.seed(0)
-        model = Sequential()
 
         self.set_n_output()
 
-        # Add Convolutional layers
-        model.add(Conv1D(filters=hp['filters'],
-                         kernel_size=hp["kernel_size"],
-                         activation='relu',
-                         padding='same',
-                         input_shape=(hp["n_steps_in"], self.n_features)
-                         )
-                  )
-        model.add(MaxPooling1D(pool_size=hp["pool_size"], padding="same"))
-        if hp["layers"] >= 2:
-            for n in range(hp["layers"] - 1):
-                model.add(Conv1D(filters=hp["filters"],
-                                 padding='same',
-                                 kernel_size=hp["kernel_size"],
-                                 activation='relu'))
-                model.add(MaxPooling1D(pool_size=hp["pool_size"], padding="same"))
+        np.random.seed(0)
+        hp = self.hyperparameters
+        print(hp)
+        if hp["simple"] == False:
+            # define model vs 1
+            model = Sequential()
+            model.add(LSTM(hp['units'], activation='relu', dropout=hp["dropout"], recurrent_dropout=hp["dropout"],
+                           input_shape=(hp["n_steps_in"], self.n_features)))
+            model.add(RepeatVector(self.forecasting_window))
+            model.add(LSTM(hp["units"], activation='relu', dropout=hp["dropout"], recurrent_dropout=hp["dropout"],
+                           return_sequences=True))
+            model.add(TimeDistributed(Dense(self.n_output)))
+            model.compile(optimizer=Adam(learning_rate=hp["learning_rate"]), loss='mse')
 
-        # Flatten the output for the fully connected layers
-        model.add(Flatten())
+        else:
+            # define model vs 2
+            inputs = Input(shape=(hp["n_steps_in"], self.n_features))
+            if hp['dropout'] > 0:
+                lstm_out = LSTM(hp["units"],
+                                dropout=hp["dropout"],
+                                recurrent_dropout=hp["dropout"],
+                                return_sequences=True)(inputs)
+            else:
+                LSTM(hp["units"], return_sequences=True)(inputs)
+            outputs = TimeDistributed(Dense(self.n_output))(lstm_out)
+            model = Model(inputs=inputs, outputs=outputs)
+            model.compile(optimizer=Adam(learning_rate=hp["learning_rate"]), loss='mse')
 
-        # Add Dense layers for regression (output layer with linear activation for forecasting)
-        model.add(Dense(hp["dense_units"], activation='relu'))
-        model.add(Dense(self.n_output_internal))
-        # Compile the model
-        model.compile(optimizer=Adam(learning_rate=hp["learning_rate"]), loss='mse')
-        # Use mean squared error for regression tasks
         self.model = model
 
     def train(self, verbose=False):
@@ -214,9 +213,12 @@ class CNNModel():
         print(f"training took a total of {t1-t0} seconds")
 
     def set_n_output(self):
-        self.n_output = int(self.y_train.shape[1] / self.forecasting_window)
-        self.n_features = self.x_train.shape[2]
-        self.n_output_internal = self.y_train.shape[1]
+        training_target = self.training_data[1]
+        training_input = self.training_data[0]
+        n_output = training_target.shape[2]
+
+        self.n_output = n_output
+        self.n_features = training_input.shape[2]
 
     def predict(self):
 
@@ -235,34 +237,34 @@ class CNNModel():
 
 def forecast_from_file(country: str, forecasting_window: int):
 
-    hyperparameters = pd.read_csv(f"best_hyperparameters/HP_CNN_{country}.csv")
+    hyperparameters = pd.read_csv(f"best_hyperparameters/HP_LSTM_{country}.csv")
 
     for ind, row in hyperparameters.iterrows():
         print(row['split_date'])
-        hp = row[["learning_rate",
+
+        hp = row[["units",
+                   "learning_rate",
                    "n_steps_in",
                    "early_stopping",
                    "smoothing",
-                   "kernel_size",
-                   "filters",
+                   "simple",
+                   "dropout",
                    "epochs",
-                   "pool_size",
-                   "layers",
-                   "dense_units",
                    "differencing",
                    "features"]].to_dict()
 
 
+
         train_end_date = datetime.strptime(row['split_date'], "%Y-%m-%d") - timedelta(days=1)
-        cnn = CNNModel(hyperparameters=hp, country=country, forecasting_window=forecasting_window)
-        cnn.load_data_from_file(train_start_date=datetime(2017, 1, 1),
-                                train_end_date=train_end_date)
-        cnn.prepare_data()
-        cnn.define_model()
-        cnn.train(verbose=True)
+        lstm = LSTMModel(hyperparameters=hp, country=country, forecasting_window=forecasting_window)
+        lstm.load_data_from_file(train_start_date=datetime(2017, 1, 1),
+                                 train_end_date=train_end_date)
+        lstm.prepare_data()
+        lstm.define_model()
+        lstm.train(verbose=True)
         dates = pd.date_range(start=train_end_date+timedelta(days=1),
                               end=train_end_date+timedelta(days=forecasting_window))
-        predictions = cnn.predict()
+        predictions = lstm.predict()
         predictions['date'] = pd.to_datetime(dates)
 
         predictions = predictions.melt(id_vars='date').rename(columns={'variable': 'adm1_code',
@@ -270,10 +272,10 @@ def forecast_from_file(country: str, forecasting_window: int):
 
         predictions = merge_predictions_and_rtm(country=country,
                                                 preds=predictions)
-        predictions.to_csv(f"forecasts/CNN/{country}_{row['split_date']}.csv")
+        predictions.to_csv(f"forecasts/LSTM/{country}_{row['split_date']}.csv")
 
     return predictions
 
 
 if __name__ =='__main__':
-    forecast_from_file(country='Syria', forecasting_window=60)
+    forecast_from_file(country='Nigeria', forecasting_window=60)
