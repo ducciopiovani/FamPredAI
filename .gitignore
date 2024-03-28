@@ -65,6 +65,9 @@ db.sqlite3-journal
 instance/
 .webassets-cache
 
+# Python Notebooks
+*.ipynb
+
 # Scrapy stuff:
 .scrapy
 
