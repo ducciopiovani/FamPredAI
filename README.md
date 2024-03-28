@@ -2,6 +2,7 @@
 Reservoir Computing for prediction of timeseries of food insecurity.
 
 ## Installation process and dependencies
+Running Reservoir Computing 
 The current repo doesn't require any installation. It can be run directly after installing the required packages using:
 ```commandline
 python -m pip install -r requirements.txt
@@ -15,6 +16,12 @@ cd rescomp
 pip install .
 ```
 Complete instructions can be found in [the docs for the package](https://glsrc.github.io/rescomp/installation.html#installation-instructions).
+Running Keras Based model (CNN, LSTM)
+The rescomp librabry is incompatible with keras because of the required version for nunmpy. To run the deep learning algorithms follow the instructions:
+```commandline
+python -m pip install -r requirements_deep_learning.txt
+```
+Once again this assumes the version of python used is 3.9. Dependencies can be installed in a virtual/conda environment.
 
 ## Data
 Data to train the models can be found for each country in `data/<country>/full_timeseries_daily.csv`.
